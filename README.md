@@ -16,3 +16,13 @@ For detailed help run the script without arguments.
 * if output file already exists it will be overwritten silently
 * commands can be taken from the G'MIC plugin for GIMP (just press Ctrl+C)
 * alternatively you can use the stand-alone version of G'MIC
+
+### Tip:
+
+To use the G'MIC filters from the "Testing" section you must update the filter definitions in the G'MIC plugin and then copy the latest update file to your home directory naming it `.gmic`:
+
+`cp $(ls "$HOME/.config/gmic/"*.gmic | sort -n -r | head -n1) $HOME/.gmic`
+
+Or in case you're using GIMP in a Flatpak:
+
+`cp $(ls "$HOME/.var/app/org.gimp.GIMP/config/gmic"/*.gmic | sort -n -r | head -n1) $HOME/.gmic`
