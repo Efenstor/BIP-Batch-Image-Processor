@@ -1,9 +1,17 @@
-# Batch Image Processor using G'MIC
+# BIP - Batch Image Processor for G'MIC and NCNN-Vulkan tools
 
-A script facilitating multithreaded processing of lots of images using the power of [G'MIC](https://gmic.eu/).
+A script facilitating multithreaded processing of lots of images using the power of **[G'MIC](https://gmic.eu/)** and various **NCNN-Vulkan** CLI tools, such as:
+
+  * [waifu2x](https://github.com/nihui/waifu2x-ncnn-vulkan)
+  * [RealSR](https://github.com/nihui/realsr-ncnn-vulkan)
+  * [Real-CUGAN](https://github.com/nihui/realcugan-ncnn-vulkan)
+  * [SRMD](https://github.com/nihui/srmd-ncnn-vulkan)
+  * [GFPGAN](https://github.com/onuralpszr/GFPGAN-ncnn-vulkan)
+  * [Real-ESRGAN](https://github.com/xinntao/Real-ESRGAN-ncnn-vulkan)
+  * [SPAN](https://github.com/TNTwise/SPAN-ncnn-vulkan)
 
 ### Usage:
-`gmicbp.sh [options] <input_dir> <output_dir> <cmd_file> [output_ext]`
+`bip.sh [options] <input> <output> <cmd_file> [output_ext]`
 
 For detailed description of the arguments run the script without any arguments or with **-h**.
 
