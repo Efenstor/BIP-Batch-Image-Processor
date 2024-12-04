@@ -1,6 +1,6 @@
 #!/bin/sh
 # Copyleft Efenstor, 2024
-version=2024.10-1
+version=2024.12-1
 
 # Defaults
 ncnn_path_default="$HOME/bin/ncnn-vulkan"
@@ -112,14 +112,28 @@ new_proc() {
   return 0
 }
 
+prepare_out_dir() {
+  if [ ! -d "$out_dir" ]; then
+    mkdir "$out_dir"
+  elif [ "$out_dir" != "." ] && [ $(ls -A "$out_dir" | wc -l) -ne 0 ]; then
+    read -p "Output dir already exists. Purge it? Y/n " ans
+    if [ "$ans" != "n" ]; then
+      echo "Purging the output dir..."
+      rm -r "$out_dir"
+      mkdir "$out_dir"
+    fi
+  fi
+}
+
 # Parse the named parameters
-optstr="?he:q:t:g:d:n:"
+optstr="?he:q:t:g:d:n:r:"
 threads=$(nproc --all)
 in_ext="*"
 out_ext="jpg"
 jpeg_quality="95"
 in_depth=1
 ncnn_path="$ncnn_path_default"
+repeat=0
 while getopts $optstr opt
 do
   case "$opt" in
@@ -134,6 +148,7 @@ do
        fi
        ;;
     n) ncnn_path="$OPTARG" ;;
+    r) repeat=$OPTARG ;;
     :) echo "Missing argument for -$OPTARG" >&2
        exit 1
        ;;
@@ -168,16 +183,19 @@ ${CYAN}output_ext:${NC} output extension/format (default=jpg)
   -n <str>: custom path to NCNN-Vulkan CLI tools
             (default=$ncnn_path_default)
   -g <str>: custom path to gmic
+  -r <num>: in single-file mode repeat processing producing <num> variants
+            from a single source (<output> must be a directory, files will have
+            names 00000001.[output_ext], 00000002.[output_ext], etc.)
 \n${CYAN}Example:${NC} ./bip.sh -e jpg . output cmd.txt png
 \n${CYAN}NCNN-Vulkan command example:${NC}
   :waifu2x-ncnn-vulkan -n 2 -m models-upconv_7_photo
   Don't add -i and -o as those will be added automatically
 \n${CYAN}Notes:${NC}
-  - cmd_file should have one command at a line
-  - cmd_file can have #comments, empty lines and extra spaces
-  - input extension is case insensitive
-  - if output directory does not exists it will be created
-  - if output file already exists it will be overwritten silently
+  - <cmd_file> should have one command at a line
+  - <cmd_file> can have #comments, empty lines and extra spaces
+  - <input> extension is case insensitive
+  - if <output> directory does not exists it will be created
+  - if <output> file already exists it will be overwritten silently
   - commands can be taken from the G'MIC plugin for GIMP (just press Ctrl+C)
   - alternatively you can use the stand-alone version of G'MIC
 \n"
@@ -201,21 +219,14 @@ if [ "$4" ]; then
   out_ext="$4"
 fi
 if [ -d "$1" ]; then
+  # Directory source
   printf "${YELLOW}MODE: batch${NC}\n"
   mode=batch
   in_dir="$1"
   out_dir="$2"
-  if [ ! -d "$out_dir" ]; then
-    mkdir "$out_dir"
-  elif [ "$out_dir" != "." ] && [ $(ls -A "$out_dir" | wc -l) -ne 0 ]; then
-    read -p "Output dir already exists. Purge it? Y/n " ans
-    if [ "$ans" != "n" ]; then
-      echo "Purging the output dir..."
-      rm -r "$out_dir"
-      mkdir "$out_dir"
-    fi
-  fi
+  prepare_out_dir
 else
+  # File source
   printf "${YELLOW}MODE: single-file${NC}\n"
   mode=sf
   in_file="$1"
@@ -225,19 +236,30 @@ else
   if [ "$out_e" = "$2" ]; then out_e=; fi
   if [ -d "$2" ] || [ ! "$out_e" ]; then
     # Out is dir name
-    out_file="$2"/"$n.$out_ext"
+    if [ $repeat -eq 0 ]; then
+      # Single-file mode
+      out_file="$2"/"$n.$out_ext"
+      out_dir=$(dirname "$out_file")
+    else
+      # Single-file+repeat mode
+      out_dir="$2"
+      prepare_out_dir
+    fi
   else
     # Out is file name
     out_file="$2"
     out_ext="${out_file##*.}"
+    out_dir=$(dirname "$out_file")
+    repeat=0  # Disable repeat mode unconditionally
   fi
-  out_dir=$(dirname "$out_file")
 fi
 cmd_file="$3"
 out_ext_lc=$(echo "$out_ext" | tr [:upper:] [:lower:])
 if [ $mode = sf ]; then
   echo "Input file: $in_file"
-  echo "Output file: $out_file"
+  if [ $repeat -eq 0 ]; then
+    echo "Output file: $out_file"
+  fi
 else
   echo "Input dir: $in_dir"
 fi
@@ -280,11 +302,17 @@ done < "$cmd_file"
 # Processing
 printf "${GREEN}Processing...${NC}\n"
 trap "ctrlc" INT
-if [ $mode = batch ]; then
+if [ $mode = batch ] || [ $repeat -gt 0 ] ; then
 
-  # Batch mode
-  files=$(find "$in_dir" ${in_depth:+-maxdepth $in_depth} -type f -iname "*.$in_ext" | sort -n -f)
-  while [ -n "$files" ]
+  # Batch/repeat mode
+  if [ $repeat -eq 0 ]; then
+    # Make the source file list
+    files=$(find "$in_dir" ${in_depth:+-maxdepth $in_depth} -type f -iname "*.$in_ext" | sort -n -f)
+  fi
+
+  # Process
+  i=0
+  while [ -n "$files" ] || [ $i -lt $repeat ]
   do
 
     # Wait for threads to free up and update the pids list
@@ -292,18 +320,34 @@ if [ $mode = batch ]; then
     printf "${CYAN}Threads free:${NC} ${YELLOW}$thr_free/$threads${NC}\n"
 
     # Run new threads
-    while [ $thr_free -gt 0 ] && [ -n "$files" ]
-    do
-      f=$(echo "$files" | head -n 1)
-      f_basename=$(basename "$f")
-      of="$out_dir"/"${f_basename%.*}.$out_ext"
-      new_proc "$f" "$of" & pids="$pids $!"; err=$?
-      if [ $err -ne 0 ]; then
-        error
-      fi
-      thr_free=$((thr_free-1))
-      files=$(echo "$files" | tail -n +2)
-    done
+    if [ $repeat -eq 0 ]; then
+      # Batch mode
+      while [ $thr_free -gt 0 ] && [ -n "$files" ]
+      do
+        f=$(echo "$files" | head -n 1)
+        f_basename=$(basename "$f")
+        of="$out_dir"/"${f_basename%.*}.$out_ext"
+        new_proc "$f" "$of" & pids="$pids $!"; err=$?
+        if [ $err -ne 0 ]; then
+          error
+        fi
+        thr_free=$((thr_free-1))
+        files=$(echo "$files" | tail -n +2)
+      done
+    else
+      # Single file+repeat mode
+      while [ $thr_free -gt 0 ] && [ $i -lt $repeat ]
+      do
+        f=$(printf "%08d" $(($i+1)) )
+        of="$out_dir"/"$f.$out_ext"
+        new_proc "$in_file" "$of" & pids="$pids $!"; err=$?
+        if [ $err -ne 0 ]; then
+          error
+        fi
+        thr_free=$((thr_free-1))
+        i=$(($i+1))
+      done
+    fi
 
   done
 
